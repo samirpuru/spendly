@@ -21,7 +21,26 @@
         </p>
         <div class="hero-actions">
             <a href="{{ url_for('register') }}" class="btn-primary">Create free account</a>
-            <a href="#" class="btn-secondary">See how it works</a>
+            <button class="btn-secondary" id="demo-trigger">See how it works</button>
+        </div>
+    </div>
+
+    <div class="demo-modal" id="demo-modal">
+        <div class="demo-modal-overlay" id="demo-modal-overlay"></div>
+        <div class="demo-modal-content">
+            <button class="demo-modal-close" id="demo-modal-close">&times;</button>
+            <div class="demo-video-container">
+                <iframe
+                    id="demo-video"
+                    width="100%"
+                    height="100%"
+                    src="https://www.youtube.com/embed/jNQXAC9IVRw"
+                    title="Spendly Demo"
+                    frameborder="0"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    allowfullscreen>
+                </iframe>
+            </div>
         </div>
     </div>
     <div class="hero-visual">
@@ -102,4 +121,49 @@
     </div>
 </section>
 
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+    const demoTrigger = document.getElementById('demo-trigger');
+    const demoModal = document.getElementById('demo-modal');
+    const demoModalClose = document.getElementById('demo-modal-close');
+    const demoModalOverlay = document.getElementById('demo-modal-overlay');
+    const demoVideo = document.getElementById('demo-video');
+
+    // Store original src
+    const originalSrc = demoVideo.src;
+
+    // Open modal
+    function openModal() {
+        demoModal.classList.add('active');
+        document.body.style.overflow = 'hidden';
+    }
+
+    // Close modal and stop video
+    function closeModal() {
+        demoModal.classList.remove('active');
+        document.body.style.overflow = '';
+
+        // Stop video by replacing src temporarily
+        demoVideo.src = '';
+        setTimeout(() => {
+            demoVideo.src = originalSrc;
+        }, 100);
+    }
+
+    // Event listeners
+    demoTrigger.addEventListener('click', openModal);
+    demoModalClose.addEventListener('click', closeModal);
+    demoModalOverlay.addEventListener('click', closeModal);
+
+    // Close modal on Escape key
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && demoModal.classList.contains('active')) {
+            closeModal();
+        }
+    });
+})();
+</script>
 {% endblock %}
