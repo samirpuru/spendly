@@ -1,14 +1,30 @@
-from flask import Flask, render_template, request, redirect, url_for
+from flask import Flask, render_template, request, redirect, url_for, session
 import sqlite3
+import os
+from functools import wraps
 
-from werkzeug.security import generate_password_hash
-from database.db import get_db, init_db, seed_db
+from werkzeug.security import generate_password_hash, check_password_hash
+from database.db import get_db, init_db, seed_db, get_user_by_email
 
 app = Flask(__name__)
+app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-key-change-in-production")
 
 with app.app_context():
     init_db()
     seed_db()
+
+
+# ------------------------------------------------------------------ #
+# Decorators                                                          #
+# ------------------------------------------------------------------ #
+
+def login_required(view):
+    @wraps(view)
+    def wrapped_view(*args, **kwargs):
+        if "user_id" not in session:
+            return redirect(url_for("login"))
+        return view(*args, **kwargs)
+    return wrapped_view
 
 
 # ------------------------------------------------------------------ #
@@ -41,9 +57,7 @@ def register():
         if error is None:
             conn = get_db()
             try:
-                existing = conn.execute(
-                    "SELECT id FROM users WHERE email = ?", (email,)
-                ).fetchone()
+                existing = get_user_by_email(conn, email)
                 if existing is not None:
                     error = "An account with this email already exists."
                 else:
@@ -67,8 +81,34 @@ def register():
     return render_template("register.html")
 
 
-@app.route("/login")
+@app.route("/login", methods=["GET", "POST"])
 def login():
+    if request.method == "POST":
+        email = request.form.get("email", "").strip().lower()
+        password = request.form.get("password", "")
+
+        error = None
+        if not email:
+            error = "Please enter your email address."
+        elif not password:
+            error = "Please enter your password."
+
+        if error is None:
+            conn = get_db()
+            try:
+                user = get_user_by_email(conn, email)
+            finally:
+                conn.close()
+
+            if user is None or not check_password_hash(user["password_hash"], password):
+                error = "Invalid email or password."
+            else:
+                session["user_id"] = user["id"]
+                session["user_name"] = user["name"]
+                return redirect(url_for("profile"))
+
+        return render_template("login.html", error=error, email=email)
+
     return render_template("login.html")
 
 
@@ -86,12 +126,14 @@ def privacy():
 # Placeholder routes — students will implement these                  #
 # ------------------------------------------------------------------ #
 
-@app.route("/logout")
+@app.route("/logout", methods=["POST"])
 def logout():
-    return "Logout — coming in Step 3"
+    session.clear()
+    return redirect(url_for("login"))
 
 
 @app.route("/profile")
+@login_required
 def profile():
     return "Profile page — coming in Step 4"
 

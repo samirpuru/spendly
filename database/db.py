@@ -71,6 +71,19 @@ def init_db():
         conn.close()
 
 
+def get_user_by_email(conn, email):
+    """
+    Look up a single user by email.
+
+    Returns:
+        sqlite3.Row with columns (id, name, email, password_hash, created_at),
+        or None if no user has that email.
+    """
+    return conn.execute(
+        "SELECT * FROM users WHERE email = ?", (email,)
+    ).fetchone()
+
+
 def seed_db():
     """
     Insert one demo user and 8 sample expenses — but only the first
