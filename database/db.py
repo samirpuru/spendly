@@ -15,6 +15,11 @@ from werkzeug.security import generate_password_hash
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(BASE_DIR, "expense_tracker.db")
 
+# Canonical list of valid expense categories. Single source of truth —
+# import this wherever category options or validation are needed
+# instead of re-typing the list.
+CATEGORIES = ["Food", "Transport", "Bills", "Health", "Entertainment", "Shopping", "Other"]
+
 
 def get_db():
     """
@@ -82,6 +87,84 @@ def get_user_by_email(conn, email):
     return conn.execute(
         "SELECT * FROM users WHERE email = ?", (email,)
     ).fetchone()
+
+
+def get_user_by_id(conn, user_id):
+    """
+    Look up a single user by id.
+
+    Returns:
+        sqlite3.Row with columns (id, name, email, password_hash, created_at),
+        or None if no user has that id.
+    """
+    return conn.execute(
+        "SELECT * FROM users WHERE id = ?", (user_id,)
+    ).fetchone()
+
+
+def get_expenses_by_user(conn, user_id):
+    """
+    Get all expenses for a user, ordered by date descending (newest first).
+
+    Returns:
+        list of sqlite3.Row objects with columns (id, user_id, amount, category,
+        date, description, created_at).
+    """
+    return conn.execute(
+        "SELECT * FROM expenses WHERE user_id = ? ORDER BY date DESC",
+        (user_id,)
+    ).fetchall()
+
+
+def get_expense_by_id(conn, expense_id, user_id):
+    """
+    Look up a single expense by id, scoped to the owning user.
+
+    Scoping by user_id in the WHERE clause ensures one user can never
+    fetch (and therefore never edit) another user's expense, even if
+    they guess or tamper with the id in the URL.
+
+    Returns:
+        sqlite3.Row with columns (id, user_id, amount, category, date,
+        description, created_at), or None if no row exists with that
+        id for that user.
+    """
+    return conn.execute(
+        "SELECT * FROM expenses WHERE id = ? AND user_id = ?",
+        (expense_id, user_id),
+    ).fetchone()
+
+
+def update_expense(conn, expense_id, user_id, amount, category, date, description):
+    """
+    Update an existing expense's editable fields.
+
+    Scoped by user_id in the WHERE clause as defense-in-depth: even if
+    a caller forgot to verify ownership beforehand, this statement can
+    never modify a row belonging to a different user.
+
+    Does NOT commit or close the connection. This follows the same
+    convention as get_user_by_email(): functions that receive an
+    already-open `conn` from the caller leave transaction/connection
+    lifecycle to the caller (see register()'s INSERT + conn.commit()
+    in app.py). Only functions that open their own connection
+    internally via get_db() — init_db(), seed_db() — commit and close
+    internally, because they own the connection's entire lifetime.
+
+    Returns:
+        int — rows affected (0 or 1). 0 means the row didn't exist or
+        wasn't owned by this user at UPDATE time (caller may treat
+        this the same as a 404).
+    """
+    cursor = conn.execute(
+        """
+        UPDATE expenses
+        SET amount = ?, category = ?, date = ?, description = ?
+        WHERE id = ? AND user_id = ?
+        """,
+        (amount, category, date, description, expense_id, user_id),
+    )
+    return cursor.rowcount
 
 
 def seed_db():

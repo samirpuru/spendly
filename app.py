@@ -1,10 +1,14 @@
-from flask import Flask, render_template, request, redirect, url_for, session
+from flask import Flask, render_template, request, redirect, url_for, session, abort
 import sqlite3
 import os
 from functools import wraps
+from datetime import datetime
 
 from werkzeug.security import generate_password_hash, check_password_hash
-from database.db import get_db, init_db, seed_db, get_user_by_email
+from database.db import (
+    get_db, init_db, seed_db, get_user_by_email, get_user_by_id, get_expenses_by_user,
+    get_expense_by_id, update_expense, CATEGORIES,
+)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-key-change-in-production")
@@ -135,36 +139,69 @@ def logout():
 @app.route("/profile")
 @login_required
 def profile():
+    conn = get_db()
+    try:
+        user_row = get_user_by_id(conn, session["user_id"])
+        expenses = get_expenses_by_user(conn, session["user_id"])
+    finally:
+        conn.close()
+
+    first_initial = user_row["name"][0].upper() if user_row["name"] else "U"
+    last_initial = user_row["name"].split()[-1][0].upper() if len(user_row["name"].split()) > 1 else ""
+    initials = first_initial + last_initial
+
+    created_at = user_row["created_at"]
+    created_date = datetime.strptime(created_at, "%Y-%m-%d %H:%M:%S") if created_at else datetime.now()
+    member_since = created_date.strftime("%B %Y")
+
     user = {
-        "name": "Demo User",
-        "email": "demo@spendly.com",
-        "initials": "DU",
-        "member_since": "January 2026",
+        "name": user_row["name"],
+        "email": user_row["email"],
+        "initials": initials,
+        "member_since": member_since,
     }
+
+    transactions = []
+    category_totals = {cat: 0.0 for cat in CATEGORIES}
+
+    for expense in expenses:
+        date_obj = datetime.strptime(expense["date"], "%Y-%m-%d")
+        formatted_date = date_obj.strftime("%d %b %Y")
+
+        transactions.append({
+            "id": expense["id"],
+            "date": formatted_date,
+            "description": expense["description"] or "No description",
+            "category": expense["category"],
+            "amount": f"₹{expense['amount']:.2f}",
+            "amount_value": expense["amount"],
+        })
+        category_totals[expense["category"]] += expense["amount"]
+
+    total_spent = sum(category_totals.values())
+    transaction_count = len(expenses)
+    top_category = max(category_totals, key=category_totals.get) if category_totals else "None"
+
     stats = {
-        "total_spent": "₹399.48",
-        "transaction_count": 8,
-        "top_category": "Shopping",
+        "total_spent": f"₹{total_spent:.2f}",
+        "transaction_count": transaction_count,
+        "top_category": top_category,
     }
-    transactions = [
-        {"date": "26 Jul 2026", "description": "Dinner at restaurant", "category": "Food", "amount": "₹60.25"},
-        {"date": "22 Jul 2026", "description": "Miscellaneous purchase", "category": "Other", "amount": "₹10.00"},
-        {"date": "18 Jul 2026", "description": "New running shoes", "category": "Shopping", "amount": "₹120.00"},
-        {"date": "14 Jul 2026", "description": "Movie tickets", "category": "Entertainment", "amount": "₹15.99"},
-        {"date": "11 Jul 2026", "description": "Pharmacy - prescription refill", "category": "Health", "amount": "₹32.75"},
-        {"date": "08 Jul 2026", "description": "Electricity bill", "category": "Bills", "amount": "₹89.99"},
-        {"date": "05 Jul 2026", "description": "Uber ride to work", "category": "Transport", "amount": "₹25.00"},
-        {"date": "02 Jul 2026", "description": "Groceries at Walmart", "category": "Food", "amount": "₹45.50"},
-    ]
-    categories = [
-        {"name": "Shopping", "amount": "₹120.00", "percent": 30, "slug": "shopping"},
-        {"name": "Food", "amount": "₹105.75", "percent": 25, "slug": "food"},
-        {"name": "Bills", "amount": "₹89.99", "percent": 20, "slug": "bills"},
-        {"name": "Health", "amount": "₹32.75", "percent": 10, "slug": "health"},
-        {"name": "Transport", "amount": "₹25.00", "percent": 5, "slug": "transport"},
-        {"name": "Entertainment", "amount": "₹15.99", "percent": 5, "slug": "entertainment"},
-        {"name": "Other", "amount": "₹10.00", "percent": 5, "slug": "other"},
-    ]
+
+    categories = []
+    for cat in CATEGORIES:
+        amount = category_totals[cat]
+        if total_spent > 0:
+            percent = int((amount / total_spent) * 100)
+        else:
+            percent = 0
+        categories.append({
+            "name": cat,
+            "amount": f"₹{amount:.2f}",
+            "percent": percent,
+            "slug": cat.lower(),
+        })
+
     return render_template(
         "profile.html",
         user=user,
@@ -179,9 +216,68 @@ def add_expense():
     return "Add expense — coming in Step 7"
 
 
-@app.route("/expenses/<int:id>/edit")
+@app.route("/expenses/<int:id>/edit", methods=["GET", "POST"])
+@login_required
 def edit_expense(id):
-    return "Edit expense — coming in Step 8"
+    conn = get_db()
+    try:
+        expense = get_expense_by_id(conn, id, session["user_id"])
+        if expense is None:
+            abort(404)
+
+        if request.method == "POST":
+            amount_raw = request.form.get("amount", "").strip()
+            category = request.form.get("category", "").strip()
+            date_raw = request.form.get("date", "").strip()
+            description = request.form.get("description", "").strip()
+
+            error = None
+            amount = None
+            parsed_date = None
+
+            try:
+                amount = float(amount_raw)
+            except (TypeError, ValueError):
+                error = "Please enter a valid amount."
+
+            if error is None and amount <= 0:
+                error = "Amount must be greater than zero."
+
+            if error is None and category not in CATEGORIES:
+                error = "Please select a valid category."
+
+            if error is None:
+                try:
+                    parsed_date = datetime.strptime(date_raw, "%Y-%m-%d")
+                except ValueError:
+                    error = "Please enter a valid date."
+
+            if error is None:
+                date_to_store = parsed_date.strftime("%Y-%m-%d")
+                update_expense(
+                    conn, id, session["user_id"],
+                    amount, category, date_to_store, description or None,
+                )
+                conn.commit()
+                return redirect(url_for("profile"))
+
+            submitted = {
+                "amount": amount_raw,
+                "category": category,
+                "date": date_raw,
+                "description": description,
+            }
+            return render_template(
+                "edit_expense.html",
+                error=error, expense=submitted, categories=CATEGORIES, id=id,
+            )
+
+        return render_template(
+            "edit_expense.html",
+            expense=expense, categories=CATEGORIES, id=id,
+        )
+    finally:
+        conn.close()
 
 
 @app.route("/expenses/<int:id>/delete")

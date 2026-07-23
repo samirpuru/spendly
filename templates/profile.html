@@ -33,7 +33,7 @@
     <div class="profile-table-wrap">
       <table class="profile-table">
         <thead>
-          <tr><th>Date</th><th>Description</th><th>Category</th><th class="amount">Amount</th></tr>
+          <tr><th>Date</th><th>Description</th><th>Category</th><th class="amount">Amount</th><th>Actions</th></tr>
         </thead>
         <tbody>
           {% for tx in transactions %}
@@ -42,6 +42,11 @@
             <td>{{ tx.description }}</td>
             <td><span class="category-badge category-badge--{{ tx.category|lower }}">{{ tx.category }}</span></td>
             <td class="amount">{{ tx.amount }}</td>
+            <td class="actions">
+              <a href="{{ url_for('edit_expense', id=tx.id) }}" class="action-link">Edit</a>
+              <span class="action-separator">•</span>
+              <a href="{{ url_for('delete_expense', id=tx.id) }}" class="action-link action-link--danger" onclick="return confirm('Delete this expense?')">Delete</a>
+            </td>
           </tr>
           {% endfor %}
         </tbody>
