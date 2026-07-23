@@ -167,6 +167,30 @@ def update_expense(conn, expense_id, user_id, amount, category, date, descriptio
     return cursor.rowcount
 
 
+def delete_expense(conn, expense_id, user_id):
+    """
+    Delete a single expense, scoped to the owning user.
+
+    Scoped by user_id in the WHERE clause as defense-in-depth: even if
+    a caller forgot to verify ownership beforehand, this statement can
+    never delete a row belonging to a different user.
+
+    Does NOT commit or close the connection — same convention as
+    update_expense() and get_expense_by_id(): the caller owns the
+    connection's transaction/lifecycle.
+
+    Returns:
+        int — rows affected (0 or 1). 0 means the row didn't exist or
+        wasn't owned by this user at DELETE time (caller may treat
+        this the same as a 404).
+    """
+    cursor = conn.execute(
+        "DELETE FROM expenses WHERE id = ? AND user_id = ?",
+        (expense_id, user_id),
+    )
+    return cursor.rowcount
+
+
 def seed_db():
     """
     Insert one demo user and 8 sample expenses — but only the first

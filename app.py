@@ -7,7 +7,7 @@ from datetime import datetime
 from werkzeug.security import generate_password_hash, check_password_hash
 from database.db import (
     get_db, init_db, seed_db, get_user_by_email, get_user_by_id, get_expenses_by_user,
-    get_expense_by_id, update_expense, CATEGORIES,
+    get_expense_by_id, update_expense, delete_expense as delete_expense_row, CATEGORIES,
 )
 
 app = Flask(__name__)
@@ -280,9 +280,18 @@ def edit_expense(id):
         conn.close()
 
 
-@app.route("/expenses/<int:id>/delete")
+@app.route("/expenses/<int:id>/delete", methods=["POST"])
+@login_required
 def delete_expense(id):
-    return "Delete expense — coming in Step 9"
+    conn = get_db()
+    try:
+        rowcount = delete_expense_row(conn, id, session["user_id"])
+        if rowcount == 0:
+            abort(404)
+        conn.commit()
+    finally:
+        conn.close()
+    return redirect(url_for("profile"))
 
 
 if __name__ == "__main__":
